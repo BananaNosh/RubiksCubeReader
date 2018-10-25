@@ -76,19 +76,6 @@ def find_colored_squares_in_image(image):
     if len(rectangles) == 0:
         return [], image
 
-    warp_ratios = get_warp_ratios(rectangles)
-
-    warp_ratio = np.mean(warp_ratios)
-    if warp_ratio > 0.1:
-        ref_index = np.argmin(np.abs(warp_ratios - warp_ratio))
-        reference_rectangle = rectangles[ref_index]
-        image = transform_according_to_reference_square(image, np.reshape(reference_rectangle, (4, 2)))
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        gray = cv2.GaussianBlur(gray, (5, 5), 0)
-        edged = cv2.Canny(gray, 50, 100)
-
-        rectangles = get_recs(edged, 0.1)
-
     rectangles = list(rectangles)
 
     if len(rectangles) < 9:
