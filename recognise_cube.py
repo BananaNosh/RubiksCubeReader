@@ -69,7 +69,7 @@ def find_colored_squares_in_image(image, colors_to_find=9):
     image = imutils.resize(image, height=500)
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     gray = cv2.GaussianBlur(gray, (5, 5), 0)
-    edged = cv2.Canny(gray, 50, 100)
+    edged = cv2.Canny(gray, 0, 40)
     # print("STEP 1: Edge Detection")
 
     rectangles = get_recs(edged, colored_image=image)
