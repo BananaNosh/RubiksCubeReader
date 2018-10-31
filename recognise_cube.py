@@ -65,7 +65,7 @@ def color_for_rect(image, rect):
     return 6
 
 
-def find_colored_squares_in_image(image):
+def find_colored_squares_in_image(image, colors_to_find=9):
     image = imutils.resize(image, height=500)
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     gray = cv2.GaussianBlur(gray, (5, 5), 0)
@@ -78,7 +78,7 @@ def find_colored_squares_in_image(image):
 
     rectangles = list(rectangles)
 
-    if len(rectangles) < 9:
+    if len(rectangles) < colors_to_find:
         for i, (lower, upper) in enumerate(zip([np.array([0, 0, 70]), np.array([100, 0, 0])],
                                                [np.array([91, 255, 170]), np.array([169, 255, 42])])):
             only_colored = cv2.inRange(image, lower, upper)
@@ -87,7 +87,7 @@ def find_colored_squares_in_image(image):
                 rectangles.extend(colored_recs)
                 rectangles = list(remove_doubles(rectangles))
 
-    if len(rectangles) > 9:
+    if len(rectangles) > colors_to_find:
         print("Too many squares found")
         return [], image
 
@@ -188,7 +188,7 @@ def remove_doubles(rectangles):
     return rectangles
 
 
-def colors_from_video(video_path=None, show=False):
+def colors_from_video(video_path=None, show=False, colors_to_find=9, mid=4):
     colors_for_sides = [[] for _ in range(6)]
     frames_after_sixth_side = 0
     if not video_path:
@@ -200,14 +200,15 @@ def colors_from_video(video_path=None, show=False):
         if frame is None or (not video_path and frames_after_sixth_side == 10):
             break
 
-        found_colors, frame = find_colored_squares_in_image(frame)
+        found_colors, frame = find_colored_squares_in_image(frame, colors_to_find=colors_to_find)
 
         if frames_after_sixth_side > 0:
             frames_after_sixth_side += 1
-        if len(found_colors) == 9 and found_colors[4] < 6:
-            colors_for_sides[found_colors[4]].append(found_colors)
-            if len(colors_for_sides[found_colors[4]]) > 50:
-                colors_for_sides[found_colors[4]].pop(0)
+        mid_color = found_colors[mid] if len(found_colors) > mid else -1
+        if len(found_colors) == colors_to_find and mid_color < 6:
+            colors_for_sides[mid_color].append(found_colors)
+            if len(colors_for_sides[mid_color]) > 50:
+                colors_for_sides[mid_color].pop(0)
             if frames_after_sixth_side == 0 and not any([len(side) == 0 for side in colors_for_sides]):
                 frames_after_sixth_side = 1
 
@@ -232,8 +233,9 @@ def colors_from_video(video_path=None, show=False):
 
 
 class CubeWebcamStream:
-    def __init__(self, src=0, name="CubeVideo"):
+    def __init__(self, src=0, name="CubeVideo", colors_to_find=9):
         self.stream = cv2.VideoCapture(src)
+        self.colors_to_find = colors_to_find
         _, self.frame = self.stream.read()
         self.colors = None
         self.name = name
@@ -255,12 +257,12 @@ class CubeWebcamStream:
 
             # otherwise, read the next frame from the stream
             _, raw_frame = self.stream.read()
-            found_colors, frame = find_colored_squares_in_image(raw_frame)
-            if len(found_colors) == 9:
+            found_colors, frame = find_colored_squares_in_image(raw_frame, colors_to_find=self.colors_to_find)
+            if len(found_colors) == self.colors_to_find:
                 self.frame = frame
                 self.colors = found_colors
             else:
-                self.frame = raw_frame
+                self.frame = raw_frame if frame is None else frame
                 self.colors = None
 
     def read(self):
@@ -288,16 +290,17 @@ if __name__ == '__main__':
         cv2.imshow("Output", _image)
         cv2.waitKey(0)
     elif video_path:
-        colors = colors_from_video(video_path=video_path, show=not video_path)
+        colors = colors_from_video(video_path=video_path, show=False)
         print(colors)
     else:
-        stream = CubeWebcamStream().start()
+        stream = CubeWebcamStream(colors_to_find=4).start()
         while True:
             colors, frame = stream.read()
 
             cv2.imshow("Frame", frame)
             key = cv2.waitKey(1) & 0xFF
-            print("colors", colors)
+            if colors is not None:
+                print("colors", colors)
 
             if key == ord("q"):
                 break
