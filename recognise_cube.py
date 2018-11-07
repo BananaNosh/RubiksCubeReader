@@ -7,12 +7,22 @@ import argparse
 from threading import Thread
 
 color_spaces_hsv = [
-    ((100, 131, 0), (125, 255, 255)),  # blue
-    ((70, 0, 0), (90, 255, 190)),  # green
-    ((40, 0, 165), (90, 100, 255)),  # yellow
-    ((85, 0, 165), (185, 105, 255)),  # white
-    ((0, 0, 165), (15, 255, 255)),  # orange
-    ((0, 110, 49), (190, 255, 161))  # red
+    [
+        ((100, 131, 0), (125, 255, 255)),  # blue
+        ((25, 0, 0), (90, 255, 190)),  # green
+        ((15, 0, 165), (90, 100, 255)),  # yellow
+        ((85, 0, 165), (185, 105, 255)),  # white
+        ((0, 0, 165), (15, 255, 255)),  # orange
+        [((0, 95, 43), (13, 255, 156)), ((150, 95, 43), (255, 255, 156))]  # red
+    ],
+    [
+        ((60, 0, 73), (170, 255, 255)),  # blue
+        ((25, 0, 0), (90, 255, 190)),  # green
+        ((15, 0, 165), (90, 100, 255)),  # yellow
+        ((85, 0, 165), (185, 105, 255)),  # white
+        ((0, 0, 165), (15, 255, 255)),  # orange
+        ((0, 110, 49), (190, 255, 161))  # red]
+    ]
 ]
 
 
@@ -59,8 +69,15 @@ def color_for_rect(image, rect):
     center_rec = get_center_rec(rect, image, rel_margin=0.25)
     mean_color = np.mean(center_rec, axis=(0, 1))
     hsv = cv2.cvtColor(mean_color.reshape((1, 1, 3)).astype(np.uint8), cv2.COLOR_BGR2HSV)
-    for j, (lower, upper) in enumerate(color_spaces_hsv):
-        if cv2.inRange(hsv, lower, upper):
+    for j, bounds in enumerate(color_spaces_hsv[0]):
+        if type(bounds) is not list:
+            bounds = [bounds]
+
+        accum_mask = np.zeros(hsv.shape[:2], dtype=np.uint8)
+        for lower, upper in bounds:
+            mask = cv2.inRange(hsv, lower, upper)
+            accum_mask = cv2.bitwise_or(accum_mask, mask)
+        if accum_mask:
             return j
     return 6
 
@@ -70,11 +87,8 @@ def find_colored_squares_in_image(image, colors_to_find=9):
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     gray = cv2.GaussianBlur(gray, (5, 5), 0)
     edged = cv2.Canny(gray, 0, 40)
-    # print("STEP 1: Edge Detection")
 
     rectangles = get_recs(edged, colored_image=image)
-    if len(rectangles) == 0:
-        return [], image
 
     rectangles = list(rectangles)
 
@@ -87,10 +101,15 @@ def find_colored_squares_in_image(image, colors_to_find=9):
                 rectangles.extend(colored_recs)
                 rectangles = list(remove_doubles(rectangles))
 
+    if len(rectangles) == 0:
+        return [], image
+
     if len(rectangles) > colors_to_find:
         print("Too many squares found")
         return [], image
 
+
+    image_with_recs = image.copy()
     recs_reshaped = np.array([order_points(np.reshape(rec, (4, 2))).astype(np.int32) for rec in rectangles])
     mean_height = int(np.max(recs_reshaped[:, [3, 2], 1] - recs_reshaped[:, [0, 1], 1]))
     recs_reshaped = sorted(recs_reshaped, key=lambda x: x[0, 0] + mean_height * 5 * (x[0, 1] // mean_height))
@@ -99,12 +118,55 @@ def find_colored_squares_in_image(image, colors_to_find=9):
         x = rec[0, 0]
         y = rec[0, 1]
         color = color_for_rect(image, rec)
-        cv2.putText(image, f"{color}", (x + 20, y + 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, [0, 0, 255])
+        cv2.putText(image_with_recs, f"{color}", (x + 20, y + 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, [0, 0, 255])
         found_colors.append(color)
 
     # rectangles = [rec.reshape((4, 1, 2)) for rec in recs_reshaped]
-    cv2.drawContours(image, rectangles, -1, (0, 255, 0), 2)
-    return found_colors, image
+    cv2.drawContours(image_with_recs, rectangles, -1, (0, 255, 0), 2)
+    return found_colors, image_with_recs
+
+
+def find_colored_squares_in_image_with_colors(image, colors_to_find=9):
+    image = imutils.resize(image, height=500)
+    image = scale_image_lighting(image, {"type": "scb", "satlevel": 0.01})
+    rectangles = []
+    hsv_image = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    for bounds in color_spaces_hsv[0]:
+        if type(bounds) is not list:
+            bounds = [bounds]
+        only_color = np.zeros(image.shape[:2], dtype=np.uint8)
+        for lower, upper in bounds:
+            mask = cv2.inRange(hsv_image, lower, upper)
+            only_color = cv2.bitwise_or(only_color, mask)
+        colored_recs = get_recs(only_color, rel_similarity_threshold=0.2, colored_image= image, already_found_recs=rectangles)
+        if len(colored_recs):
+            rectangles.extend(colored_recs)
+    rectangles = list(remove_doubles(rectangles))
+
+    if len(rectangles) > colors_to_find:
+        print("Too many squares found")
+        return [], image
+
+    if len(rectangles) == 0:
+        return [], image
+
+    image_with_recs = image.copy()
+
+    recs_reshaped = np.array([order_points(np.reshape(rec, (4, 2))).astype(np.int32) for rec in rectangles])
+    mean_height = int(np.mean(recs_reshaped[:, [3, 2], 1] - recs_reshaped[:, [0, 1], 1]))
+    min_y = np.min(recs_reshaped[:, [0, 1], 1])
+    recs_reshaped = sorted(recs_reshaped, key=lambda x: x[0, 0] + mean_height * 5 * int((x[0, 1] - min_y) // mean_height + 0.25))
+    found_colors = []
+    for i, rec in enumerate(recs_reshaped): # TODO make simpler => colors already given above
+        x = rec[0, 0]
+        y = rec[0, 1]
+        color = color_for_rect(image, rec)
+        cv2.putText(image_with_recs, f"{color}", (x + 20, y + 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255))
+        found_colors.append(color)
+
+    # rectangles = [rec.reshape((4, 1, 2)) for rec in recs_reshaped]
+    cv2.drawContours(image_with_recs, rectangles, -1, (0, 255, 0), 2)
+    return found_colors, image_with_recs
 
 
 def get_warp_ratios(rectangles):
@@ -120,7 +182,7 @@ def get_warp_ratios(rectangles):
 
 
 def get_recs(image_to_extract_from, rel_similarity_threshold=0.05, colored_image=None, already_found_recs=None):
-    cnts = cv2.findContours(image_to_extract_from.copy(), cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)[1]
+    cnts = cv2.findContours(image_to_extract_from, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)[1]
     cnts = sorted(cnts, key=cv2.contourArea, reverse=True)
     rectangles = []
     if already_found_recs is not None:
@@ -129,14 +191,18 @@ def get_recs(image_to_extract_from, rel_similarity_threshold=0.05, colored_image
     for c in cnts:
         # approximate the contour
         peri = cv2.arcLength(c, True)
-        approx = cv2.approxPolyDP(c, 0.02 * peri, True)
+        approx = cv2.approxPolyDP(c, 0.03 * peri, True)
 
         # if our approximated contour has four points, then we
         # can assume that we have found a square
         if len(approx) == 4:
             sq_area = cv2.contourArea(approx)
-            if sq_area < 1000:
+            if sq_area < 500:
                 break
+
+            # check for being filled
+            if np.mean(get_center_rec(approx, image_to_extract_from)) < 230:
+                continue
 
             # check for similarity in color within approx
             if colored_image is not None:
@@ -200,7 +266,7 @@ def colors_from_video(video_path=None, show=False, colors_to_find=9, mid=4):
         if frame is None or (not video_path and frames_after_sixth_side == 10):
             break
 
-        found_colors, frame = find_colored_squares_in_image(frame, colors_to_find=colors_to_find)
+        found_colors, frame = find_colored_squares_in_image_with_colors(frame, colors_to_find=colors_to_find)
 
         if frames_after_sixth_side > 0:
             frames_after_sixth_side += 1
@@ -257,7 +323,7 @@ class CubeWebcamStream:
 
             # otherwise, read the next frame from the stream
             _, raw_frame = self.stream.read()
-            found_colors, frame = find_colored_squares_in_image(raw_frame, colors_to_find=self.colors_to_find)
+            found_colors, frame = find_colored_squares_in_image_with_colors(raw_frame, colors_to_find=self.colors_to_find)
             if len(found_colors) == self.colors_to_find:
                 self.frame = frame
                 self.colors = found_colors
@@ -278,14 +344,17 @@ if __name__ == '__main__':
     ap = argparse.ArgumentParser()
     ap.add_argument("-i", "--image", help="path to input image")
     ap.add_argument("-v", "--video", help="path to input video")
+    ap.add_argument("-c", "--count", type=int, help="number of field per side")
 
     args = vars(ap.parse_args())
 
     image_path = args.get("image", False)
     video_path = args.get("video", None)
+    fields_count = args.get("count", None)
+    fields_count = 9 if fields_count is None else fields_count
     if image_path:
         _image = cv2.imread(image_path)
-        _found_colors, _image = find_colored_squares_in_image(_image)
+        _found_colors, _image = find_colored_squares_in_image_with_colors(_image, fields_count)
         print(f"colors {image_path}:", _found_colors)
         cv2.imshow("Output", _image)
         cv2.waitKey(0)
@@ -293,7 +362,7 @@ if __name__ == '__main__':
         colors = colors_from_video(video_path=video_path, show=False)
         print(colors)
     else:
-        stream = CubeWebcamStream(colors_to_find=4).start()
+        stream = CubeWebcamStream(colors_to_find=fields_count).start()
         while True:
             colors, frame = stream.read()
 
@@ -304,4 +373,5 @@ if __name__ == '__main__':
 
             if key == ord("q"):
                 break
+        stream.stop()
         cv2.destroyAllWindows()
