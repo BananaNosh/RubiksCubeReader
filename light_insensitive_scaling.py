@@ -236,6 +236,7 @@ if __name__ == '__main__':
                     help="scaling type: simple color balance, gray world, robust auto-white balance")
     ap.add_argument("-c", "--cattype", choices=["bradford", "kries", "xyz"], help="cattype")
     ap.add_argument("-s", "--satlevel", type=float, help="saturation level for scb")
+    ap.add_argument("-o", "--output", help="output path only supported for image so far")
 
     args = vars(ap.parse_args())
 
@@ -256,9 +257,15 @@ if __name__ == '__main__':
     fields_count = args.get("count", 9)
     if image_path:
         _image = cv2.imread(image_path)
+        if _image is None:
+            print("No such image")
+            exit(-1)
         _image = method(_image, *m_args)
         cv2.imshow("Output", _image)
         cv2.waitKey(0)
+        ouput_path = args.get("output", None)
+        if ouput_path is not None:
+            cv2.imwrite(ouput_path, _image)
     else:
         vc = cv2.VideoCapture(0 if not video_path else video_path)
         while True:
