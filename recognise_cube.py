@@ -128,7 +128,7 @@ def find_colored_squares_in_image(image, colors_to_find=9):
 
 def find_colored_squares_in_image_with_colors(image, colors_to_find=9):
     image = imutils.resize(image, height=500)
-    image = scale_image_lighting(image, {"type": "scb", "satlevel": 0.01})
+    # image = scale_image_lighting(image, {"type": "scb", "satlevel": 0.01})
     rectangles = []
     hsv_image = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
     for bounds in color_spaces_hsv[0]:
@@ -298,6 +298,50 @@ def colors_from_video(video_path=None, show=False, colors_to_find=9, mid=4):
     return colors_for_sides
 
 
+def all_possible_color_areas(image, deviation=10):
+    # hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    # hue_range = 30
+    # for i in range(256):
+    #     lower_bound = np.array((i, 0, 0))
+    #     upper_bound = np.array((min(i + hue_range, 255), 255, 255))
+    #     filtered = cv2.inRange(hsv, lower_bound, upper_bound)
+    #     cv2.imshow("im", filtered)
+    #     cv2.waitKey(0)
+    window_size = 50
+    cv2.rectangle(image, (0, 0), (window_size, window_size), (0, 0, 255), thickness=1)
+    if window_size > min(image.shape[:2]):
+        raise AssertionError("Window bigger than image")
+    step_size = 1
+    window = image[:window_size:step_size, :window_size:step_size]
+    last_color_sum = np.sum(window, axis=(0, 1))
+    last_squared_sum = np.sum(np.square(window, dtype=np.int32), axis=(0, 1))
+    first_in_row_sum = last_color_sum.copy()
+    first_in_row_squared = last_squared_sum.copy()
+    n = (window_size // step_size)**2
+    found_points = []
+    for x in range(1, image.shape[0] - window_size):
+        first_in_row_sum = first_in_row_sum - np.sum(image[x-1, 0:window_size], axis=0) \
+                           + np.sum(image[x-1+window_size, 0:window_size], axis=0)
+        first_in_row_squared = first_in_row_squared - np.sum(np.square(image[x-1, 0:window_size], dtype=np.int32), axis=0) \
+                           + np.sum(np.square(image[x-1+window_size, 0:window_size], dtype=np.int32), axis=0)
+        last_color_sum = first_in_row_sum.copy()
+        last_squared_sum = first_in_row_squared.copy()
+        for y in range(1, image.shape[1] - window_size):
+            last_color_sum = last_color_sum - np.sum(image[x:x+window_size, y-1], axis=0) \
+                               + np.sum(image[x:x+window_size, y-1+window_size], axis=0)
+            last_squared_sum = last_squared_sum - np.sum(np.square(image[x:x+window_size, y-1], dtype=np.int32), axis=0) \
+                               + np.sum(np.square(image[x:x+window_size, y-1+window_size], dtype=np.int32), axis=0)
+            std = np.mean(last_squared_sum / n - (last_color_sum / n)**2)
+            if std < 400:
+                print(x, y, std)
+                found_points.append((x, y))
+            # print(f"pos: ({x},{y}) - {std}")
+    for x, y in found_points:
+        cv2.circle(image, (y + window_size//2, x + window_size//2), 1, (0, 0, 255), 1)
+    cv2.imshow("im", image)
+    cv2.waitKey(0)
+
+
 class CubeWebcamStream:
     def __init__(self, src=0, name="CubeVideo", colors_to_find=9):
         self.stream = cv2.VideoCapture(src)
@@ -341,6 +385,10 @@ class CubeWebcamStream:
 
 
 if __name__ == '__main__':
+    image = cv2.imread("./data/cube_1_1.png")
+    all_possible_color_areas(image)
+    print("ready")
+
     ap = argparse.ArgumentParser()
     ap.add_argument("-i", "--image", help="path to input image")
     ap.add_argument("-v", "--video", help="path to input video")
