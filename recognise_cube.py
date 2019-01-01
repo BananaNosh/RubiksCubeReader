@@ -298,26 +298,18 @@ def colors_from_video(video_path=None, show=False, colors_to_find=9, mid=4):
     return colors_for_sides
 
 
-def all_possible_color_areas(image, deviation=10):
-    # hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
-    # hue_range = 30
-    # for i in range(256):
-    #     lower_bound = np.array((i, 0, 0))
-    #     upper_bound = np.array((min(i + hue_range, 255), 255, 255))
-    #     filtered = cv2.inRange(hsv, lower_bound, upper_bound)
-    #     cv2.imshow("im", filtered)
-    #     cv2.waitKey(0)
-    window_size = 50
-    cv2.rectangle(image, (0, 0), (window_size, window_size), (0, 0, 255), thickness=1)
+def all_possible_color_areas(image, window_size=None):
+    original_image = image
+    if window_size is None:
+        window_size = image.shape[0] // 10
     if window_size > min(image.shape[:2]):
         raise AssertionError("Window bigger than image")
-    step_size = 1
-    window = image[:window_size:step_size, :window_size:step_size]
+    window = image[:window_size, :window_size]
     last_color_sum = np.sum(window, axis=(0, 1))
     last_squared_sum = np.sum(np.square(window, dtype=np.int32), axis=(0, 1))
     first_in_row_sum = last_color_sum.copy()
     first_in_row_squared = last_squared_sum.copy()
-    n = (window_size // step_size)**2
+    n = window_size**2
     found_points = []
     for x in range(1, image.shape[0] - window_size):
         first_in_row_sum = first_in_row_sum - np.sum(image[x-1, 0:window_size], axis=0) \
@@ -331,14 +323,39 @@ def all_possible_color_areas(image, deviation=10):
                                + np.sum(image[x:x+window_size, y-1+window_size], axis=0)
             last_squared_sum = last_squared_sum - np.sum(np.square(image[x:x+window_size, y-1], dtype=np.int32), axis=0) \
                                + np.sum(np.square(image[x:x+window_size, y-1+window_size], dtype=np.int32), axis=0)
-            std = np.mean(last_squared_sum / n - (last_color_sum / n)**2)
+            std = (last_squared_sum / n - (last_color_sum / n)**2)[0]
             if std < 400:
-                print(x, y, std)
                 found_points.append((x, y))
             # print(f"pos: ({x},{y}) - {std}")
     for x, y in found_points:
-        cv2.circle(image, (y + window_size//2, x + window_size//2), 1, (0, 0, 255), 1)
+        border = image.shape[0] // 36
+        cv2.rectangle(image, (y + border, x + border), (y + window_size - border, x + window_size - border), (0, 0, 255), cv2.FILLED)
+        # cv2.circle(image, (y + window_size//2, x + window_size//2), 1, (0, 0, 255), 1)
     cv2.imshow("im", image)
+    edged = cv2.inRange(image, (0, 0, 255), (0, 0, 255))
+    cv2.imshow("bin", edged)
+    cnts = cv2.findContours(edged, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)[1]
+    cnts = sorted(cnts, key=cv2.contourArea, reverse=True)
+    rectangles = []
+    for c in cnts:
+        # approximate the contour
+        peri = cv2.arcLength(c, True)
+        approx = cv2.approxPolyDP(c, 0.03 * peri, True)
+
+        # if our approximated contour has four points, then we
+        # can assume that we have found a square
+        if len(approx) == 4:
+            rectangles.append(approx)
+    centers = [np.mean(r, axis=(0, 1), dtype=np.int32) for r in rectangles]
+    dists = []
+    for i, center1 in enumerate(centers):
+        cv2.circle(original_image, tuple(center1), 1, (255, 0, 0))
+        for j, center2 in centers[i+1:]:
+            j = j + i + 1
+            dists.append((np.sum(np.square(center2 - center1)), (i, j)))
+    cv2.drawContours(original_image, rectangles, -1, (0, 255, 0))
+    cv2.imshow("cnts", original_image)
+    print("dists", sorted(dists))
     cv2.waitKey(0)
 
 
@@ -385,41 +402,44 @@ class CubeWebcamStream:
 
 
 if __name__ == '__main__':
-    image = cv2.imread("./data/cube_1_1.png")
-    all_possible_color_areas(image)
+    image_names = ["cube_1_4.png"]#[f"cube_1_{i}.png" for i in range(6)]
+    for name in image_names:
+        image = cv2.imread(f"./data/{name}")
+        image = imutils.resize(image, image.shape[0] // 1)
+        all_possible_color_areas(image)
     print("ready")
-
-    ap = argparse.ArgumentParser()
-    ap.add_argument("-i", "--image", help="path to input image")
-    ap.add_argument("-v", "--video", help="path to input video")
-    ap.add_argument("-c", "--count", type=int, help="number of field per side")
-
-    args = vars(ap.parse_args())
-
-    image_path = args.get("image", False)
-    video_path = args.get("video", None)
-    fields_count = args.get("count", None)
-    fields_count = 9 if fields_count is None else fields_count
-    if image_path:
-        _image = cv2.imread(image_path)
-        _found_colors, _image = find_colored_squares_in_image_with_colors(_image, fields_count)
-        print(f"colors {image_path}:", _found_colors)
-        cv2.imshow("Output", _image)
-        cv2.waitKey(0)
-    elif video_path:
-        colors = colors_from_video(video_path=video_path, show=False)
-        print(colors)
-    else:
-        stream = CubeWebcamStream(colors_to_find=fields_count).start()
-        while True:
-            colors, frame = stream.read()
-
-            cv2.imshow("Frame", frame)
-            key = cv2.waitKey(1) & 0xFF
-            if colors is not None:
-                print("colors", colors)
-
-            if key == ord("q"):
-                break
-        stream.stop()
-        cv2.destroyAllWindows()
+    #
+    # ap = argparse.ArgumentParser()
+    # ap.add_argument("-i", "--image", help="path to input image")
+    # ap.add_argument("-v", "--video", help="path to input video")
+    # ap.add_argument("-c", "--count", type=int, help="number of field per side")
+    #
+    # args = vars(ap.parse_args())
+    #
+    # image_path = args.get("image", False)
+    # video_path = args.get("video", None)
+    # fields_count = args.get("count", None)
+    # fields_count = 9 if fields_count is None else fields_count
+    # if image_path:
+    #     _image = cv2.imread(image_path)
+    #     _found_colors, _image = find_colored_squares_in_image_with_colors(_image, fields_count)
+    #     print(f"colors {image_path}:", _found_colors)
+    #     cv2.imshow("Output", _image)
+    #     cv2.waitKey(0)
+    # elif video_path:
+    #     colors = colors_from_video(video_path=video_path, show=False)
+    #     print(colors)
+    # else:
+    #     stream = CubeWebcamStream(colors_to_find=fields_count).start()
+    #     while True:
+    #         colors, frame = stream.read()
+    #
+    #         cv2.imshow("Frame", frame)
+    #         key = cv2.waitKey(1) & 0xFF
+    #         if colors is not None:
+    #             print("colors", colors)
+    #
+    #         if key == ord("q"):
+    #             break
+    #     stream.stop()
+    #     cv2.destroyAllWindows()
