@@ -302,45 +302,22 @@ def all_possible_color_areas(image, window_size=None):
     original_image = image
     if window_size is None:
         window_size = image.shape[0] // 10
-    if window_size > min(image.shape[:2]):
-        raise AssertionError("Window bigger than image")
-    window = image[:window_size, :window_size]
-    last_color_sum = np.sum(window, axis=(0, 1))
-    last_squared_sum = np.sum(np.square(window, dtype=np.int32), axis=(0, 1))
-    first_in_row_sum = last_color_sum.copy()
-    first_in_row_squared = last_squared_sum.copy()
-    n = window_size**2
-    found_points = []
-    for x in range(1, image.shape[0] - window_size):
-        first_in_row_sum = first_in_row_sum - np.sum(image[x-1, 0:window_size], axis=0) \
-                           + np.sum(image[x-1+window_size, 0:window_size], axis=0)
-        first_in_row_squared = first_in_row_squared - np.sum(np.square(image[x-1, 0:window_size], dtype=np.int32), axis=0) \
-                           + np.sum(np.square(image[x-1+window_size, 0:window_size], dtype=np.int32), axis=0)
-        last_color_sum = first_in_row_sum.copy()
-        last_squared_sum = first_in_row_squared.copy()
-        for y in range(1, image.shape[1] - window_size):
-            last_color_sum = last_color_sum - np.sum(image[x:x+window_size, y-1], axis=0) \
-                               + np.sum(image[x:x+window_size, y-1+window_size], axis=0)
-            last_squared_sum = last_squared_sum - np.sum(np.square(image[x:x+window_size, y-1], dtype=np.int32), axis=0) \
-                               + np.sum(np.square(image[x:x+window_size, y-1+window_size], dtype=np.int32), axis=0)
-            std = (last_squared_sum / n - (last_color_sum / n)**2)[0]
-            if std < 400:
-                found_points.append((x, y))
-            # print(f"pos: ({x},{y}) - {std}")
+    found_points = points_with_variation_in_border(image, window_size, 300)
     for x, y in found_points:
         border = image.shape[0] // 36
         cv2.rectangle(image, (y + border, x + border), (y + window_size - border, x + window_size - border), (0, 0, 255), cv2.FILLED)
         # cv2.circle(image, (y + window_size//2, x + window_size//2), 1, (0, 0, 255), 1)
-    cv2.imshow("im", image)
+    # cv2.imshow("im", image)
     edged = cv2.inRange(image, (0, 0, 255), (0, 0, 255))
-    cv2.imshow("bin", edged)
+    # cv2.imshow("bin", edged)
     cnts = cv2.findContours(edged, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)[1]
     cnts = sorted(cnts, key=cv2.contourArea, reverse=True)
     rectangles = []
     for c in cnts:
         # approximate the contour
         peri = cv2.arcLength(c, True)
-        approx = cv2.approxPolyDP(c, 0.03 * peri, True)
+        epsilon_factor = 0.03
+        approx = cv2.approxPolyDP(c, epsilon_factor * peri, True)
 
         # if our approximated contour has four points, then we
         # can assume that we have found a square
@@ -349,14 +326,60 @@ def all_possible_color_areas(image, window_size=None):
     centers = [np.mean(r, axis=(0, 1), dtype=np.int32) for r in rectangles]
     dists = []
     for i, center1 in enumerate(centers):
-        cv2.circle(original_image, tuple(center1), 1, (255, 0, 0))
-        for j, center2 in centers[i+1:]:
+        cv2.putText(original_image, str(i), tuple(center1), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0))
+        cv2.circle(original_image, tuple(center1), 1, (255, 0, 0), 1)
+        for j, center2 in enumerate(centers[i+1:]):
             j = j + i + 1
             dists.append((np.sum(np.square(center2 - center1)), (i, j)))
+    dists = sorted(dists)
+    print("dists", dists)
+    dists_dict = dict((i, [i]) for i in range(len(centers)))
+    center_index = None
+    min_in_range_of_center = 7
+    for dist, (i, j) in dists:
+        dists_dict[i].append(j)
+        dists_dict[j].append(i)
+        if center_index is None:
+            if len(dists_dict[i]) > min_in_range_of_center:
+                center_index = i
+            elif len(dists_dict[j]) > min_in_range_of_center:
+                center_index = j
+    print("centerIndex", center_index, dists_dict[center_index])
     cv2.drawContours(original_image, rectangles, -1, (0, 255, 0))
     cv2.imshow("cnts", original_image)
-    print("dists", sorted(dists))
     cv2.waitKey(0)
+
+
+def points_with_variation_in_border(image, window_size, variation_threshold=400):
+    if window_size > min(image.shape[:2]):
+        raise AssertionError("Window bigger than image")
+    window = image[:window_size, :window_size]
+    last_color_sum = np.sum(window, axis=(0, 1))
+    last_squared_sum = np.sum(np.square(window, dtype=np.int32), axis=(0, 1))
+    first_in_row_sum = last_color_sum.copy()
+    first_in_row_squared = last_squared_sum.copy()
+    n = window_size ** 2
+    found_points = []
+    for x in range(1, image.shape[0] - window_size):
+        first_in_row_sum = first_in_row_sum - np.sum(image[x - 1, 0:window_size], axis=0) \
+                           + np.sum(image[x - 1 + window_size, 0:window_size], axis=0)
+        first_in_row_squared = first_in_row_squared - np.sum(np.square(image[x - 1, 0:window_size], dtype=np.int32),
+                                                             axis=0) \
+                               + np.sum(np.square(image[x - 1 + window_size, 0:window_size], dtype=np.int32), axis=0)
+        last_color_sum = first_in_row_sum.copy()
+        last_squared_sum = first_in_row_squared.copy()
+        for y in range(1, image.shape[1] - window_size):
+            last_color_sum = last_color_sum - np.sum(image[x:x + window_size, y - 1], axis=0) \
+                             + np.sum(image[x:x + window_size, y - 1 + window_size], axis=0)
+            last_squared_sum = last_squared_sum - np.sum(np.square(image[x:x + window_size, y - 1], dtype=np.int32),
+                                                         axis=0) \
+                               + np.sum(np.square(image[x:x + window_size, y - 1 + window_size], dtype=np.int32),
+                                        axis=0)
+            std = np.mean(last_squared_sum / n - (last_color_sum / n) ** 2)
+            if std < variation_threshold:
+                found_points.append((x, y))
+            # print(f"pos: ({x},{y}) - {std}")
+    return found_points
 
 
 class CubeWebcamStream:
@@ -402,11 +425,19 @@ class CubeWebcamStream:
 
 
 if __name__ == '__main__':
-    image_names = ["cube_1_4.png"]#[f"cube_1_{i}.png" for i in range(6)]
+    # image_names = [f"cube_1_{i}.png" for i in range(6)]
+    image_names = [f"cube_1_5_warped.png"]
     for name in image_names:
         image = cv2.imread(f"./data/{name}")
         image = imutils.resize(image, image.shape[0] // 1)
-        all_possible_color_areas(image)
+        new_image = image.copy()
+        indices = np.where(np.sum(np.square((image.T - np.mean(image, axis=2).T).T), axis=2) < 100)
+        new_image[indices] = 255
+        # cv2.imshow(f"image-{name}", image)
+        # cv2.imshow(f"new-{name}", new_image)
+        # image[np.where()]
+        all_possible_color_areas(new_image)
+    cv2.waitKey(0)
     print("ready")
     #
     # ap = argparse.ArgumentParser()
