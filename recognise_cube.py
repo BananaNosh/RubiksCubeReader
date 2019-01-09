@@ -5,6 +5,7 @@ import numpy as np
 import math
 import argparse
 from threading import Thread
+import light_insensitive_scaling
 
 color_spaces_hsv = [
     [
@@ -344,7 +345,7 @@ def all_possible_color_areas(image, window_size=None):
                 center_index = i
             elif len(dists_dict[j]) > min_in_range_of_center:
                 center_index = j
-    print("centerIndex", center_index, dists_dict[center_index])
+    print("centerIndex", center_index, dists_dict[center_index] if center_index is not None else None)
     cv2.drawContours(original_image, rectangles, -1, (0, 255, 0))
     cv2.imshow("cnts", original_image)
     cv2.waitKey(0)
@@ -424,19 +425,37 @@ class CubeWebcamStream:
         self.stopped = True
 
 
+def select_image_from_video(name="noname"):
+    stream = cv2.VideoCapture(0)
+    while True:
+        _, image = stream.read()
+        key = cv2.waitKey(1)
+        if key == ord("x"):
+            break
+        cv2.imshow(f"image-{name}", image)
+    cv2.imshow(f"image-{name}", image)
+    return image
+
+
 if __name__ == '__main__':
     # image_names = [f"cube_1_{i}.png" for i in range(6)]
-    image_names = [f"cube_1_5_warped.png"]
+    image_names = [f"cube_1_4.png"]
     for name in image_names:
         image = cv2.imread(f"./data/{name}")
+        image = select_image_from_video(name)
+        image = light_insensitive_scaling.scale_image_lighting(image, {"type": "rwb"})
+        cv2.imshow(f"image_scaled-{name}", image)
         image = imutils.resize(image, image.shape[0] // 1)
+        hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+
         new_image = image.copy()
-        indices = np.where(np.sum(np.square((image.T - np.mean(image, axis=2).T).T), axis=2) < 100)
-        new_image[indices] = 255
-        # cv2.imshow(f"image-{name}", image)
-        # cv2.imshow(f"new-{name}", new_image)
-        # image[np.where()]
-        all_possible_color_areas(new_image)
+        black_indices = np.where(np.logical_and(np.sum(np.square((image.T - np.mean(image, axis=2).T).T), axis=2) < 250, hsv[:, :, 2] < 80))
+        # white_indices = np.where(np.logical_and(hsv[:, :, 2] > 90, hsv[:, :, 1] < 50))
+        new_image[black_indices] = 255  # np.array([100, 0, 255])
+        # new_image[white_indices] = np.array([100, 0, 255])
+        cv2.imshow(f"new-{name}", new_image)
+        # cv2.waitKey(0)
+        all_possible_color_areas(new_image, 50)
     cv2.waitKey(0)
     print("ready")
     #
