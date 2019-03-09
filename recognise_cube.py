@@ -5,6 +5,7 @@ import numpy as np
 import math
 import argparse
 from threading import Thread
+from copy import deepcopy
 import light_insensitive_scaling
 
 color_spaces_hsv = [
@@ -299,13 +300,16 @@ def colors_from_video(video_path=None, show=False, colors_to_find=9, mid=4):
     return colors_for_sides
 
 
+# def color_canny_edge(image, threshold)
+
+
 def all_possible_color_areas(image, window_size=None):
     original_image = image
     if window_size is None:
-        window_size = image.shape[0] // 10
-    found_points = points_with_variation_in_border(image, window_size, 300)
+        window_size = image.shape[0] // 20
+    found_points = points_with_variation_in_border(image, window_size, 400)
     for x, y in found_points:
-        border = image.shape[0] // 36
+        border = image.shape[0] // 50
         cv2.rectangle(image, (y + border, x + border), (y + window_size - border, x + window_size - border), (0, 0, 255), cv2.FILLED)
         # cv2.circle(image, (y + window_size//2, x + window_size//2), 1, (0, 0, 255), 1)
     # cv2.imshow("im", image)
@@ -354,20 +358,21 @@ def all_possible_color_areas(image, window_size=None):
 def points_with_variation_in_border(image, window_size, variation_threshold=400):
     if window_size > min(image.shape[:2]):
         raise AssertionError("Window bigger than image")
-    window = image[:window_size, :window_size]
-    last_color_sum = np.sum(window, axis=(0, 1))
-    last_squared_sum = np.sum(np.square(window, dtype=np.int32), axis=(0, 1))
-    first_in_row_sum = last_color_sum.copy()
-    first_in_row_squared = last_squared_sum.copy()
-    n = window_size ** 2
-    found_points = []
+    window_sizes = range(15, 51, 5)
+    windows = [image[:window_size, :window_size] for window_size in window_sizes]
+    last_color_sums = [np.sum(window, axis=(0, 1)) for window in windows]
+    last_squared_sums = [np.sum(np.square(window, dtype=np.int32), axis=(0, 1)) for window in windows]
+    first_in_row_sum = deepcopy(last_color_sums)
+    first_in_row_squared = deepcopy(last_squared_sums)
+    ns = [window_size ** 2 for window_size in window_sizes]
+    found_points = [[] for _ in window_sizes]
     for x in range(1, image.shape[0] - window_size):
         first_in_row_sum = first_in_row_sum - np.sum(image[x - 1, 0:window_size], axis=0) \
                            + np.sum(image[x - 1 + window_size, 0:window_size], axis=0)
         first_in_row_squared = first_in_row_squared - np.sum(np.square(image[x - 1, 0:window_size], dtype=np.int32),
                                                              axis=0) \
                                + np.sum(np.square(image[x - 1 + window_size, 0:window_size], dtype=np.int32), axis=0)
-        last_color_sum = first_in_row_sum.copy()
+        last_color_sum = deepcopy(first_in_row_sum)
         last_squared_sum = first_in_row_squared.copy()
         for y in range(1, image.shape[1] - window_size):
             last_color_sum = last_color_sum - np.sum(image[x:x + window_size, y - 1], axis=0) \
@@ -443,7 +448,7 @@ if __name__ == '__main__':
     for name in image_names:
         image = cv2.imread(f"./data/{name}")
         image = select_image_from_video(name)
-        image = light_insensitive_scaling.scale_image_lighting(image, {"type": "rwb"})
+        # image = light_insensitive_scaling.scale_image_lighting(image, {"type": "rwb"})
         cv2.imshow(f"image_scaled-{name}", image)
         image = imutils.resize(image, image.shape[0] // 1)
         hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
@@ -455,7 +460,7 @@ if __name__ == '__main__':
         # new_image[white_indices] = np.array([100, 0, 255])
         cv2.imshow(f"new-{name}", new_image)
         # cv2.waitKey(0)
-        all_possible_color_areas(new_image, 50)
+        all_possible_color_areas(new_image)
     cv2.waitKey(0)
     print("ready")
     #
